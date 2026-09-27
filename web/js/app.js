@@ -31,6 +31,7 @@ const state = {
   extras: null,
   ctx: null,
   expanded: new Set(),
+  sortKey: 'rank',
   auto: true,
   timer: null,
   updatedAt: null,
@@ -97,6 +98,10 @@ async function init() {
     state.leagueId = null;
     writeParams();
     showForm();
+  });
+  $('#standings-sort').addEventListener('change', (e) => {
+    state.sortKey = e.target.value;
+    renderStandings();
   });
   $('#standings').addEventListener('click', (e) => {
     const row = e.target.closest('tr[data-entry]');
@@ -317,14 +322,21 @@ function rankMove(n) {
     : `<span class="move down" title="Down ${-n}">▼${-n}</span>`;
 }
 
-function renderStandings() {
+function sortedStandingsRows() {
   const { rows } = state.result;
+  if (state.sortKey === 'rank') return rows;
+  const key = state.sortKey;
+  return [...rows].sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
+}
+
+function renderStandings() {
+  const rows = sortedStandingsRows();
   const body = rows
     .map((r) => {
       if (r.missing) {
         return `<tr class="missing"><td class="num">${r.liveTotalRank}</td><td></td>
           <td>${teamCell(r)}</td><td class="num" colspan="2">no team this GW</td>
-          <td class="num strong">${r.liveTotal}</td><td colspan="2"></td></tr>`;
+          <td class="num strong">${r.liveTotal}</td><td colspan="3"></td></tr>`;
       }
       const open = state.expanded.has(r.entry);
       const cap = r.effectiveCaptain ?? r.captain;
@@ -334,19 +346,25 @@ function renderStandings() {
         <td class="num">${rankMove(r.rankChange)}</td>
         <td>${teamCell(r)}</td>
         <td class="num strong">${r.net}${r.hits ? `<span class="hit">-${r.hits}</span>` : ''}</td>
-        <td class="hide-sm">${esc(playerName(cap))}${capSwapped ? ' <span class="tag" title="Vice-captain took the armband">VC</span>' : ''}</td>
+        <td class="hide-sm">
+          <div>C: ${esc(playerName(cap))}${capSwapped ? ' <span class="tag" title="Vice-captain took the armband">VC</span>' : ''}</div>
+          <div class="muted small">V: ${esc(playerName(r.vice))}</div>
+        </td>
         <td class="num strong">${r.liveTotal}</td>
+        <td class="num hide-sm">${r.benchPoints}</td>
         <td>${r.chip ? `<span class="chip chip-${esc(r.chip)}">${esc(CHIP_LABELS[r.chip] || r.chip)}</span>` : ''}</td>
         <td class="hide-sm progress">${progress(r.counts)}</td>
       </tr>`;
-      return open ? main + `<tr class="detail"><td colspan="8">${teamDetail(r)}</td></tr>` : main;
+      return open ? main + `<tr class="detail"><td colspan="9">${teamDetail(r)}</td></tr>` : main;
     })
     .join('');
   $('#standings tbody').innerHTML = body;
 }
 
 function teamCell(r) {
-  return `<div class="team-name">${esc(r.teamName)}</div><div class="manager">${esc(r.manager)}</div>`;
+  return `<div class="team-name">${esc(r.teamName)}</div><div class="manager">${esc(r.manager)}</div>${
+    r.missing ? '' : `<div class="muted small">${price(r.squadValue)}</div>`
+  }`;
 }
 
 function progress(c) {

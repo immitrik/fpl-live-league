@@ -185,6 +185,7 @@ export function scoreEntry(picksData, ctx) {
   }
 
   let gwPoints = 0;
+  let benchPoints = 0;
   const counts = { done: 0, live: 0, pending: 0 };
   for (const p of picks) {
     p.inXI = xi.includes(p);
@@ -197,6 +198,8 @@ export function scoreEntry(picksData, ctx) {
       if (p.state === 'live') counts.live++;
       else if (p.state === 'pending') counts.pending++;
       else counts.done++;
+    } else {
+      benchPoints += p.live.points;
     }
   }
 
@@ -208,6 +211,7 @@ export function scoreEntry(picksData, ctx) {
   return {
     chip,
     gwPoints,
+    benchPoints,
     hits: history.event_transfers_cost || 0,
     transfers: history.event_transfers || 0,
     captain: captain?.element ?? null,
@@ -246,6 +250,8 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
         prevTotal: s.total,
         liveTotal: s.total,
         net: 0,
+        benchPoints: 0,
+        squadValue: 0,
         missing: true,
       });
       continue;
@@ -254,6 +260,7 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
     const h = picksData.entry_history || {};
     const prevTotal = (h.total_points ?? 0) - ((h.points ?? 0) - (h.event_transfers_cost ?? 0));
     const net = score.gwPoints - score.hits;
+    const squadValue = score.picks.reduce((sum, p) => sum + (p.price || 0), 0);
     rows.push({
       entry: s.entry,
       teamName: s.entry_name,
@@ -261,6 +268,7 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
       prevTotal,
       liveTotal: prevTotal + net,
       net,
+      squadValue,
       ...score,
     });
   }
@@ -426,7 +434,7 @@ export function teamValueExtremes(rows) {
     entry: r.entry,
     teamName: r.teamName,
     manager: r.manager,
-    value: r.picks.reduce((s, p) => s + (p.price || 0), 0),
+    value: r.squadValue,
   }));
   return {
     best: withValue.reduce((a, r) => (r.value > a.value ? r : a)),
