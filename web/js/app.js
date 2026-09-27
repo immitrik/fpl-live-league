@@ -10,6 +10,8 @@ import {
   captainDistribution,
   differentials,
   aggregateTransfers,
+  teamValueExtremes,
+  managerTransferExtremes,
   buildTeamOfTheWeek,
 } from './scoring.js';
 
@@ -184,12 +186,15 @@ async function refreshLive(manual = false) {
     state.ctx = buildContext(state.bootstrap, live, fixtures, state.gw);
     state.result = aggregateLeague(state.standings.results, state.picks, state.ctx);
     const { players, rows } = state.result;
+    const transfersAgg = aggregateTransfers(state.transfers, state.gw, state.ctx);
     state.extras = {
       popular: mostPopularByPosition(players),
       valuable: mostValuableByPosition(players),
       captains: captainDistribution(rows),
       diffs: differentials(players),
-      transfers: aggregateTransfers(state.transfers, state.gw, state.ctx),
+      transfers: transfersAgg,
+      teamValue: teamValueExtremes(rows),
+      managerTransfers: managerTransferExtremes(transfersAgg.byEntry, rows),
       totw: buildTeamOfTheWeek(players),
     };
     state.updatedAt = new Date();
@@ -230,6 +235,10 @@ function renderGwSelect() {
 const teamShort = (id) => state.ctx?.teams.get(id)?.short ?? '';
 const playerName = (id) => state.ctx?.players.get(id)?.name ?? '—';
 const playerTeamShort = (id) => teamShort(state.ctx?.players.get(id)?.team);
+function managerLabel(entry) {
+  const r = state.result.rows.find((x) => x.entry === entry);
+  return r ? `${r.teamName} (${r.manager})` : `#${entry}`;
+}
 
 function render() {
   const { rows } = state.result;
@@ -263,6 +272,8 @@ function render() {
   renderValuable();
   renderTransfers();
   renderTransferExtremes();
+  renderTeamValue();
+  renderManagerTransfers();
   renderCaptains();
   renderDifferentials();
   renderTotw();
@@ -411,10 +422,14 @@ function renderValuable() {
   const { valuable } = state.extras;
   $('#valuable').innerHTML = posGrid(
     valuable,
-    (p) => `<div class="mini-card">
+    (p) => {
+      const benched = p.owned - p.started;
+      return `<div class="mini-card">
       <div class="mini-name">${esc(p.name)} <small>${esc(teamShort(p.team))}</small></div>
       <div class="mini-sub">${price(p.price)} · ${p.owned} owner${p.owned === 1 ? '' : 's'} · <strong>${p.points} pts</strong></div>
-    </div>`,
+      <div class="mini-sub">${benched > 0 ? `benched by ${benched} manager${benched === 1 ? '' : 's'}` : 'never benched'}</div>
+    </div>`;
+    },
   );
 }
 
@@ -442,21 +457,51 @@ function renderTransfers() {
   `;
 }
 
-function transferCard(t, label) {
-  if (!t) return `<div><h3>${label}</h3><p class="muted small">No transfers yet this gameweek.</p></div>`;
-  const sign = t.delta > 0 ? '+' : '';
-  return `<div><h3>${label}</h3>
-    <div class="mini-card">
-      <div class="mini-name">${esc(playerName(t.elementOut))} → ${esc(playerName(t.elementIn))}</div>
-      <div class="mini-sub">${esc(playerName(t.elementOut))}: ${t.pointsOut} pts · ${esc(playerName(t.elementIn))}: ${t.pointsIn} pts</div>
-      <div class="mini-sub strong">${sign}${t.delta} pts swing</div>
-    </div>
-  </div>`;
+function transferGroup(list, label) {
+  if (!list.length) return `<div><h3>${label}</h3><p class="muted small">No transfers yet this gameweek.</p></div>`;
+  return `<div><h3>${label}</h3>${list
+    .map((t, i) => {
+      const sign = t.delta > 0 ? '+' : '';
+      return `<div class="mini-card">
+        <div class="mini-name">#${i + 1} ${esc(managerLabel(t.entry))}</div>
+        <div class="mini-sub">${esc(playerName(t.elementOut))} (${t.pointsOut}) → ${esc(playerName(t.elementIn))} (${t.pointsIn})</div>
+        <div class="mini-sub strong">${sign}${t.delta} pts swing</div>
+      </div>`;
+    })
+    .join('')}</div>`;
 }
 
 function renderTransferExtremes() {
   const { best, worst } = state.extras.transfers;
-  $('#transfer-extremes').innerHTML = `${transferCard(best, '📈 Best transfer')}${transferCard(worst, '📉 Worst transfer')}`;
+  $('#transfer-extremes').innerHTML = `${transferGroup(best, '📈 Best transfers')}${transferGroup(worst, '📉 Worst transfers')}`;
+}
+
+function renderTeamValue() {
+  const tv = state.extras.teamValue;
+  if (!tv) {
+    $('#team-value').innerHTML = '';
+    return;
+  }
+  const line = (r, label) => `<div class="mini-card">
+    <div class="mini-name">${label}</div>
+    <div class="mini-sub">${esc(r.teamName)} (${esc(r.manager)})</div>
+    <div class="mini-sub strong">${price(r.value)}</div>
+  </div>`;
+  $('#team-value').innerHTML = `<div class="two-col">${line(tv.best, '🔝 Highest squad value')}${line(tv.worst, '🔻 Lowest squad value')}</div>`;
+}
+
+function renderManagerTransfers() {
+  const mt = state.extras.managerTransfers;
+  if (!mt) {
+    $('#manager-transfers').innerHTML = '<p class="muted small">No transfers made in the league this gameweek.</p>';
+    return;
+  }
+  const line = (r, label) => `<div class="mini-card">
+    <div class="mini-name">${label}</div>
+    <div class="mini-sub">${esc(r.teamName)} (${esc(r.manager)}) · ${r.transfers} transfer${r.transfers === 1 ? '' : 's'}${r.hits ? ` · −${r.hits} hit` : ''}</div>
+    <div class="mini-sub strong">${r.net > 0 ? '+' : ''}${r.net} pts net</div>
+  </div>`;
+  $('#manager-transfers').innerHTML = `<div class="two-col">${line(mt.best, '📈 Best transfer week')}${line(mt.worst, '📉 Worst transfer week')}</div>`;
 }
 
 function renderCaptains() {
@@ -493,10 +538,11 @@ function renderDifferentials() {
     .join('')}</div>`;
 }
 
-function pitchCard(p, isCaptain) {
+function pitchCard(p, isCaptain, multiplier) {
+  const pts = isCaptain ? p.points * multiplier : p.points;
   return `<div class="pitch-card">
-    <div class="pitch-name">${esc(p.name)}${isCaptain ? ' <span class="tag cap">C</span>' : ''}</div>
-    <div class="pitch-sub">${esc(teamShort(p.team))} · ${p.points} pts</div>
+    <div class="pitch-name">${esc(p.name)}${isCaptain ? ` <span class="tag cap">C×${multiplier}</span>` : ''}</div>
+    <div class="pitch-sub">${esc(teamShort(p.team))} · ${pts} pts</div>
   </div>`;
 }
 
@@ -509,7 +555,7 @@ function renderTotw() {
   const rowsHtml = [totw.gk, totw.def, totw.mid, totw.fwd]
     .map(
       (row) =>
-        `<div class="pitch-row">${row.map((p) => pitchCard(p, p.element === totw.captain)).join('')}</div>`,
+        `<div class="pitch-row">${row.map((p) => pitchCard(p, p.element === totw.captain, totw.captainMultiplier)).join('')}</div>`,
     )
     .join('');
   $('#totw').innerHTML = `

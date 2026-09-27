@@ -288,13 +288,17 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
           owned: 0,
           started: 0,
           captained: 0,
+          captainMultiplier: 0,
           multiplierSum: 0,
         });
       }
       const st = stats.get(p.element);
       st.owned++;
       if (p.inXI) st.started++;
-      if (p.multiplier > 1) st.captained++;
+      if (p.multiplier > 1) {
+        st.captained++;
+        st.captainMultiplier = Math.max(st.captainMultiplier, p.multiplier);
+      }
       st.multiplierSum += p.multiplier;
     }
   }
@@ -335,12 +339,12 @@ export function mostPopularByPosition(players) {
   );
 }
 
-/** Top 2 point-scorers per position this gameweek (ties at the cut-off included). */
+/** Top 3 point-scorers per position this gameweek (ties at the cut-off included). */
 export function mostValuableByPosition(players) {
   return topByPosition(
     players.filter((p) => p.owned > 0),
     (p) => p.points,
-    2,
+    3,
   );
 }
 
@@ -392,9 +396,64 @@ export function aggregateTransfers(transfersByEntry, gw, ctx) {
       .map(([element, count]) => ({ element, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  const best = events.length ? events.reduce((a, e) => (e.delta > a.delta ? e : a)) : null;
-  const worst = events.length ? events.reduce((a, e) => (e.delta < a.delta ? e : a)) : null;
-  return { mostBought: toList(inCounts), mostSold: toList(outCounts), best, worst, count: events.length };
+
+  const byEntry = new Map();
+  for (const e of events) {
+    const cur = byEntry.get(e.entry) || { entry: e.entry, delta: 0, count: 0 };
+    cur.delta += e.delta;
+    cur.count++;
+    byEntry.set(e.entry, cur);
+  }
+
+  const best = [...events].sort((a, b) => b.delta - a.delta).slice(0, 3);
+  const worst = [...events].sort((a, b) => a.delta - b.delta).slice(0, 3);
+
+  return {
+    mostBought: toList(inCounts),
+    mostSold: toList(outCounts),
+    best,
+    worst,
+    byEntry: [...byEntry.values()],
+    count: events.length,
+  };
+}
+
+/** Highest and lowest total squad value (all 15 picks) across the league this GW. */
+export function teamValueExtremes(rows) {
+  const scored = rows.filter((r) => !r.missing);
+  if (!scored.length) return null;
+  const withValue = scored.map((r) => ({
+    entry: r.entry,
+    teamName: r.teamName,
+    manager: r.manager,
+    value: r.picks.reduce((s, p) => s + (p.price || 0), 0),
+  }));
+  return {
+    best: withValue.reduce((a, r) => (r.value > a.value ? r : a)),
+    worst: withValue.reduce((a, r) => (r.value < a.value ? r : a)),
+  };
+}
+
+/** Best and worst manager this gameweek by net points swing from their own transfers (hits included). */
+export function managerTransferExtremes(byEntry, rows) {
+  if (!byEntry.length) return null;
+  const rowsByEntry = new Map(rows.map((r) => [r.entry, r]));
+  const withNet = byEntry.map((e) => {
+    const row = rowsByEntry.get(e.entry);
+    return {
+      entry: e.entry,
+      teamName: row?.teamName,
+      manager: row?.manager,
+      transfers: e.count,
+      delta: e.delta,
+      hits: row?.hits || 0,
+      net: e.delta - (row?.hits || 0),
+    };
+  });
+  return {
+    best: withNet.reduce((a, r) => (r.net > a.net ? r : a)),
+    worst: withNet.reduce((a, r) => (r.net < a.net ? r : a)),
+  };
 }
 
 // ---------------------------------------------------------------- team of the week
@@ -521,6 +580,7 @@ export function buildTeamOfTheWeek(players) {
       points: p.points,
       owned: p.started,
       captained: p.captained,
+      captainMultiplier: p.captainMultiplier || 0,
     });
   }
   if (!pool[1].length || pool[2].length < 3 || pool[3].length < 2 || pool[4].length < 1) return null;
@@ -582,16 +642,19 @@ export function buildTeamOfTheWeek(players) {
   team = repairClubLimits(team, pool);
 
   const eligibleCaptains = team.filter((p) => p.captained > 0);
+  const captainBonus = (p) => p.points * ((p.captainMultiplier || 2) - 1);
   const captain = eligibleCaptains.length
-    ? eligibleCaptains.reduce((a, p) => (p.points > a.points ? p : a))
+    ? eligibleCaptains.reduce((a, p) => (captainBonus(p) > captainBonus(a) ? p : a))
     : null;
+  const captainMultiplier = captain ? captain.captainMultiplier || 2 : null;
 
   const baseTotal = team.reduce((s, p) => s + p.points, 0);
-  const totalPoints = captain ? baseTotal + captain.points : baseTotal;
+  const totalPoints = captain ? baseTotal + captainBonus(captain) : baseTotal;
   const cost = team.reduce((s, p) => s + p.cost, 0);
 
   return {
     formation: `${d}-${m}-${f}`,
+    captainMultiplier,
     gk: team.filter((p) => p.type === 1),
     def: team.filter((p) => p.type === 2),
     mid: team.filter((p) => p.type === 3),
