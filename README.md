@@ -5,8 +5,6 @@ live Fantasy Premier League standings with provisional bonus, projected auto-sub
 chips, transfer hits and league ownership, straight from the official FPL API to a web page.
 No database and no spreadsheet in between.
 
-![Screenshot](docs/screenshot.png)
-
 ## Features
 
 - **Live league table**: live GW points, live total, live rank and rank movement since the start of the gameweek

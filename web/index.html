@@ -74,26 +74,42 @@
         </section>
 
         <section class="panel">
-          <h2>League ownership</h2>
-          <p class="muted small">
-            EO (effective ownership) = share of managers starting the player, counting captains twice (triple captain three times).
-          </p>
-          <div class="table-wrap">
-            <table id="players">
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th class="hide-sm">Pos</th>
-                  <th>Team</th>
-                  <th class="num">Pts</th>
-                  <th class="num">Owned</th>
-                  <th class="num">Capt</th>
-                  <th class="num">EO</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <h2>⚽ Team of the week</h2>
+          <p class="muted small">Best legal XI (formation, 3-per-club limit, £100.0m budget) drawn only from players who started for at least one manager. Captain is whoever the league actually made captain.</p>
+          <div id="totw"></div>
+        </section>
+
+        <section class="panel">
+          <h2>🔥 Differentials of the week</h2>
+          <p class="muted small">Started by 1–2 managers and scored more than 6 points.</p>
+          <div id="differentials"></div>
+        </section>
+
+        <section class="panel">
+          <h2>👑 Captain distribution</h2>
+          <div id="captains"></div>
+        </section>
+
+        <section class="panel">
+          <h2>🌟 Most popular players</h2>
+          <p class="muted small">Top 3 most-owned players per position (ties included).</p>
+          <div id="popular" class="pos-grid"></div>
+        </section>
+
+        <section class="panel">
+          <h2>💎 Most valuable players</h2>
+          <p class="muted small">Top gameweek scorers per position (ties included), with price and owners.</p>
+          <div id="valuable" class="pos-grid"></div>
+        </section>
+
+        <section class="panel">
+          <h2>🔁 Popular transfers</h2>
+          <div id="transfers" class="two-col"></div>
+        </section>
+
+        <section class="panel">
+          <h2>📈📉 Best & worst transfer of the week</h2>
+          <div id="transfer-extremes" class="two-col"></div>
         </section>
       </section>
     </main>

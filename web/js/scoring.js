@@ -43,7 +43,7 @@ export function buildContext(bootstrap, live, fixtures, gw) {
   const players = new Map(
     bootstrap.elements.map((e) => [
       e.id,
-      { id: e.id, name: e.web_name, team: e.team, type: e.element_type },
+      { id: e.id, name: e.web_name, team: e.team, type: e.element_type, price: e.now_cost || 0 },
     ]),
   );
   const teams = new Map(
@@ -139,6 +139,7 @@ export function scoreEntry(picksData, ctx) {
         name: info?.name ?? `#${p.element}`,
         type: info?.type ?? 0,
         team: info?.team ?? 0,
+        price: info?.price ?? 0,
         live: ctx.liveById.get(p.element) || EMPTY_LIVE,
         state: ctx.fixtureState(p.element),
       };
@@ -281,6 +282,7 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
           name: p.name,
           team: p.team,
           type: p.type,
+          price: p.price,
           points: p.live.points,
           state: p.state,
           owned: 0,
@@ -306,4 +308,296 @@ export function aggregateLeague(standings, picksByEntry, ctx) {
     .sort((a, b) => b.eoPct - a.eoPct || b.points - a.points);
 
   return { rows, players, managers: scored.length };
+}
+
+// ---------------------------------------------------------------- dashboard extras
+
+/** Group a list by element_type (1..4) and keep the top N by keyFn, extending the
+ *  cut-off to include ties with the last qualifying value. */
+function topByPosition(list, keyFn, take) {
+  const byPos = { 1: [], 2: [], 3: [], 4: [] };
+  for (const p of list) byPos[p.type]?.push(p);
+  const result = {};
+  for (const type of [1, 2, 3, 4]) {
+    const sorted = [...byPos[type]].sort((a, b) => keyFn(b) - keyFn(a));
+    const cutValue = sorted[take - 1] ? keyFn(sorted[take - 1]) : null;
+    result[type] = cutValue === null ? sorted : sorted.filter((p, i) => i < take || keyFn(p) === cutValue);
+  }
+  return result;
+}
+
+/** Top 3 most-owned players per position. */
+export function mostPopularByPosition(players) {
+  return topByPosition(
+    players.filter((p) => p.owned > 0),
+    (p) => p.owned,
+    3,
+  );
+}
+
+/** Top 2 point-scorers per position this gameweek (ties at the cut-off included). */
+export function mostValuableByPosition(players) {
+  return topByPosition(
+    players.filter((p) => p.owned > 0),
+    (p) => p.points,
+    2,
+  );
+}
+
+/** Distribution of the (effective) captain armband across the league. */
+export function captainDistribution(rows) {
+  const scored = rows.filter((r) => !r.missing);
+  const n = scored.length || 1;
+  const counts = new Map();
+  for (const r of scored) {
+    const cap = r.effectiveCaptain ?? r.captain;
+    if (!cap) continue;
+    counts.set(cap, (counts.get(cap) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([element, count]) => ({ element, count, pct: (count / n) * 100 }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Differentials: started by 1-2 managers and scored more than 6 points this GW. */
+export function differentials(players, { maxOwners = 2, minPoints = 6 } = {}) {
+  return players
+    .filter((p) => p.started >= 1 && p.started <= maxOwners && p.points > minPoints)
+    .sort((a, b) => b.points - a.points);
+}
+
+/** Aggregate the current gameweek's transfers across the league. */
+export function aggregateTransfers(transfersByEntry, gw, ctx) {
+  const inCounts = new Map();
+  const outCounts = new Map();
+  const events = [];
+  for (const [entry, list] of transfersByEntry) {
+    if (!list) continue;
+    for (const t of list) {
+      if (t.event !== gw) continue;
+      inCounts.set(t.element_in, (inCounts.get(t.element_in) || 0) + 1);
+      outCounts.set(t.element_out, (outCounts.get(t.element_out) || 0) + 1);
+      events.push({
+        entry,
+        elementIn: t.element_in,
+        elementOut: t.element_out,
+        pointsIn: ctx.liveById.get(t.element_in)?.points ?? 0,
+        pointsOut: ctx.liveById.get(t.element_out)?.points ?? 0,
+      });
+    }
+  }
+  for (const e of events) e.delta = e.pointsIn - e.pointsOut;
+  const toList = (map) =>
+    [...map.entries()]
+      .map(([element, count]) => ({ element, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  const best = events.length ? events.reduce((a, e) => (e.delta > a.delta ? e : a)) : null;
+  const worst = events.length ? events.reduce((a, e) => (e.delta < a.delta ? e : a)) : null;
+  return { mostBought: toList(inCounts), mostSold: toList(outCounts), best, worst, count: events.length };
+}
+
+// ---------------------------------------------------------------- team of the week
+
+const TOTW_FORMATIONS = [
+  [3, 4, 3], [3, 5, 2],
+  [4, 3, 3], [4, 4, 2], [4, 5, 1],
+  [5, 2, 3], [5, 3, 2], [5, 4, 1],
+];
+const TOTW_BUDGET = 1000; // tenths of a million, matches FPL `now_cost`
+const TOTW_MAX_PER_CLUB = 3;
+
+/** dp[k][b] = max points choosing exactly k items with total cost <= b. */
+function knapsackValues(items, maxK, maxBudget) {
+  const NEG = -Infinity;
+  const dp = Array.from({ length: maxK + 1 }, () => new Float64Array(maxBudget + 1).fill(NEG));
+  dp[0].fill(0);
+  for (const it of items) {
+    for (let k = Math.min(maxK, items.length); k >= 1; k--) {
+      const prev = dp[k - 1];
+      const cur = dp[k];
+      for (let b = maxBudget; b >= it.cost; b--) {
+        const v = prev[b - it.cost];
+        if (v !== NEG && v + it.points > cur[b]) cur[b] = v + it.points;
+      }
+    }
+  }
+  return dp;
+}
+
+/** Best achievable value combining two independent knapsack value rows over a shared budget. */
+function convolveMax(a, b) {
+  const n = a.length;
+  const out = new Float64Array(n).fill(-Infinity);
+  for (let i = 0; i < n; i++) {
+    if (a[i] === -Infinity) continue;
+    for (let j = 0; j <= n - 1 - i; j++) {
+      if (b[j] === -Infinity) continue;
+      const v = a[i] + b[j];
+      if (v > out[i + j]) out[i + j] = v;
+    }
+  }
+  return out;
+}
+
+/** Reconstructs the exact item set achieving dp[k][maxBudget] for a single position pool. */
+function knapsackReconstruct(items, k, maxBudget) {
+  if (k === 0) return { value: 0, items: [] };
+  const NEG = -Infinity;
+  const dp = Array.from({ length: k + 1 }, () => new Float64Array(maxBudget + 1).fill(NEG));
+  const choice = Array.from({ length: k + 1 }, () => new Int32Array(maxBudget + 1).fill(-1));
+  dp[0].fill(0);
+  items.forEach((it, i) => {
+    for (let c = k; c >= 1; c--) {
+      const prev = dp[c - 1];
+      const cur = dp[c];
+      for (let b = maxBudget; b >= it.cost; b--) {
+        const v = prev[b - it.cost];
+        if (v !== NEG && v + it.points > cur[b]) {
+          cur[b] = v + it.points;
+          choice[c][b] = i;
+        }
+      }
+    }
+  });
+  const picked = [];
+  let c = k;
+  let b = maxBudget;
+  while (c > 0 && b >= 0) {
+    const i = choice[c][b];
+    if (i === -1) break;
+    picked.push(items[i]);
+    b -= items[i].cost;
+    c--;
+  }
+  return { value: dp[k][maxBudget] === NEG ? 0 : dp[k][maxBudget], items: picked };
+}
+
+/** Best single replacement for `type`, excluding `exclude` elements and clubs already at the cap. */
+function bestReplacement(pool, type, exclude, budget, forbiddenClubs) {
+  const candidates = pool[type].filter((p) => !exclude.has(p.element) && !forbiddenClubs.has(p.team) && p.cost <= budget);
+  if (!candidates.length) return null;
+  return candidates.reduce((a, p) => (p.points > a.points ? p : a));
+}
+
+/** Swap out over-the-cap club players for the best legal alternative until the 3-per-club rule holds. */
+function repairClubLimits(team, pool) {
+  let guard = 0;
+  while (guard++ < 30) {
+    const byClub = new Map();
+    for (const p of team) byClub.set(p.team, (byClub.get(p.team) || 0) + 1);
+    const offendingClub = [...byClub.entries()].find(([, n]) => n > TOTW_MAX_PER_CLUB)?.[0];
+    if (offendingClub === undefined) break;
+
+    const offenders = team.filter((p) => p.team === offendingClub).sort((a, b) => a.points - b.points);
+    const victim = offenders[0];
+    const usedCost = team.reduce((s, p) => s + p.cost, 0);
+    const budget = TOTW_BUDGET - usedCost + victim.cost;
+    const exclude = new Set(team.map((p) => p.element));
+    const forbiddenClubs = new Set([...byClub.entries()].filter(([, n]) => n > TOTW_MAX_PER_CLUB).map(([c]) => c));
+    const replacement = bestReplacement(pool, victim.type, exclude, budget, forbiddenClubs);
+    if (!replacement) break; // no legal swap found; leave the (rare) violation in place
+    const idx = team.indexOf(victim);
+    team[idx] = replacement;
+  }
+  return team;
+}
+
+/**
+ * Build the league's "team of the week": the highest-scoring legal XI (formation,
+ * budget <= 100.0m, max 3 per club) drawn only from players who started for at
+ * least one manager, captained by whoever the league actually made captain.
+ */
+export function buildTeamOfTheWeek(players) {
+  const pool = { 1: [], 2: [], 3: [], 4: [] };
+  for (const p of players) {
+    if (p.started < 1) continue;
+    pool[p.type]?.push({
+      element: p.element,
+      name: p.name,
+      team: p.team,
+      type: p.type,
+      cost: p.price || 0,
+      points: p.points,
+      owned: p.started,
+      captained: p.captained,
+    });
+  }
+  if (!pool[1].length || pool[2].length < 3 || pool[3].length < 2 || pool[4].length < 1) return null;
+
+  const gkTable = knapsackValues(pool[1], 1, TOTW_BUDGET);
+  const defTable = knapsackValues(pool[2], 5, TOTW_BUDGET);
+  const midTable = knapsackValues(pool[3], 5, TOTW_BUDGET);
+  const fwdTable = knapsackValues(pool[4], 3, TOTW_BUDGET);
+
+  let formation = null;
+  let bestValue = -Infinity;
+  for (const [d, m, f] of TOTW_FORMATIONS) {
+    if (pool[2].length < d || pool[3].length < m || pool[4].length < f) continue;
+    let combo = convolveMax(gkTable[1], defTable[d]);
+    combo = convolveMax(combo, midTable[m]);
+    combo = convolveMax(combo, fwdTable[f]);
+    const value = combo[TOTW_BUDGET];
+    if (value > bestValue) {
+      bestValue = value;
+      formation = [d, m, f];
+    }
+  }
+  if (!formation) return null;
+  const [d, m, f] = formation;
+
+  const gk = knapsackReconstruct(pool[1], 1, TOTW_BUDGET).items;
+  const budgetLeft = TOTW_BUDGET - gk.reduce((s, p) => s + p.cost, 0);
+  const defT = knapsackValues(pool[2], d, budgetLeft);
+  const midT = knapsackValues(pool[3], m, budgetLeft);
+  const fwdT = knapsackValues(pool[4], f, budgetLeft);
+
+  let split = null;
+  let splitValue = -Infinity;
+  for (let bd = 0; bd <= budgetLeft; bd++) {
+    const vd = defT[d][bd];
+    if (vd === -Infinity) continue;
+    for (let bm = 0; bm <= budgetLeft - bd; bm++) {
+      const vm = midT[m][bm];
+      if (vm === -Infinity) continue;
+      const bf = budgetLeft - bd - bm;
+      const vf = fwdT[f][bf];
+      if (vf === -Infinity) continue;
+      const total = vd + vm + vf;
+      if (total > splitValue) {
+        splitValue = total;
+        split = [bd, bm, bf];
+      }
+    }
+  }
+  if (!split) return null;
+  const [bd, bm, bf] = split;
+
+  let team = [
+    ...gk,
+    ...knapsackReconstruct(pool[2], d, bd).items,
+    ...knapsackReconstruct(pool[3], m, bm).items,
+    ...knapsackReconstruct(pool[4], f, bf).items,
+  ];
+  team = repairClubLimits(team, pool);
+
+  const eligibleCaptains = team.filter((p) => p.captained > 0);
+  const captain = eligibleCaptains.length
+    ? eligibleCaptains.reduce((a, p) => (p.points > a.points ? p : a))
+    : null;
+
+  const baseTotal = team.reduce((s, p) => s + p.points, 0);
+  const totalPoints = captain ? baseTotal + captain.points : baseTotal;
+  const cost = team.reduce((s, p) => s + p.cost, 0);
+
+  return {
+    formation: `${d}-${m}-${f}`,
+    gk: team.filter((p) => p.type === 1),
+    def: team.filter((p) => p.type === 2),
+    mid: team.filter((p) => p.type === 3),
+    fwd: team.filter((p) => p.type === 4),
+    captain: captain?.element ?? null,
+    totalPoints,
+    cost,
+  };
 }

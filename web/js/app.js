@@ -1,6 +1,17 @@
 import { CONFIG } from './config.js';
 import { api, loadStandings, mapLimit, ApiError } from './api.js';
-import { buildContext, aggregateLeague, POSITIONS, CHIP_LABELS } from './scoring.js';
+import {
+  buildContext,
+  aggregateLeague,
+  POSITIONS,
+  CHIP_LABELS,
+  mostPopularByPosition,
+  mostValuableByPosition,
+  captainDistribution,
+  differentials,
+  aggregateTransfers,
+  buildTeamOfTheWeek,
+} from './scoring.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) =>
@@ -13,7 +24,9 @@ const state = {
   bootstrap: null,
   standings: null,
   picks: new Map(),
+  transfers: new Map(),
   result: null,
+  extras: null,
   ctx: null,
   expanded: new Set(),
   auto: true,
@@ -137,6 +150,18 @@ async function loadLeague({ keepBootstrap = false } = {}) {
       setStatus(`Loading teams… ${done}/${entries.length}`);
     });
 
+    setStatus('Loading transfers…');
+    state.transfers = new Map();
+    const movers = entries.filter((s) => (state.picks.get(s.entry)?.entry_history?.event_transfers || 0) > 0);
+    await mapLimit(movers, CONFIG.CONCURRENCY, async (s) => {
+      try {
+        state.transfers.set(s.entry, await api.transfers(s.entry));
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== 404) console.warn(err);
+        state.transfers.set(s.entry, null);
+      }
+    });
+
     await refreshLive();
   } catch (err) {
     console.error(err);
@@ -158,6 +183,15 @@ async function refreshLive(manual = false) {
     const [live, fixtures] = await Promise.all([api.live(state.gw), api.fixtures(state.gw)]);
     state.ctx = buildContext(state.bootstrap, live, fixtures, state.gw);
     state.result = aggregateLeague(state.standings.results, state.picks, state.ctx);
+    const { players, rows } = state.result;
+    state.extras = {
+      popular: mostPopularByPosition(players),
+      valuable: mostValuableByPosition(players),
+      captains: captainDistribution(rows),
+      diffs: differentials(players),
+      transfers: aggregateTransfers(state.transfers, state.gw, state.ctx),
+      totw: buildTeamOfTheWeek(players),
+    };
     state.updatedAt = new Date();
     setStatus(
       state.standings.truncated
@@ -195,6 +229,7 @@ function renderGwSelect() {
 
 const teamShort = (id) => state.ctx?.teams.get(id)?.short ?? '';
 const playerName = (id) => state.ctx?.players.get(id)?.name ?? '—';
+const playerTeamShort = (id) => teamShort(state.ctx?.players.get(id)?.team);
 
 function render() {
   const { rows } = state.result;
@@ -215,16 +250,22 @@ function render() {
   const chips = scored.filter((r) => r.chip).length;
 
   $('#summary').innerHTML = [
-    card('Managers', scored.length),
-    card('Average GW', avg.toFixed(1)),
-    card('Top GW score', best ? `${best.net}` : '—', best ? esc(best.teamName) : ''),
-    card('Most captained', topCap ? esc(playerName(topCap[0])) : '—', topCap ? `${topCap[1]} of ${scored.length}` : ''),
-    card('Chips played', chips),
+    card('👥 Managers', scored.length),
+    card('📊 Average GW', avg.toFixed(1)),
+    card('🏆 Top GW score', best ? `${best.net}` : '—', best ? esc(best.teamName) : ''),
+    card('👑 Most captained', topCap ? esc(playerName(topCap[0])) : '—', topCap ? `${topCap[1]} of ${scored.length}` : ''),
+    card('🃏 Chips played', chips),
   ].join('');
 
   renderFixtures();
   renderStandings();
-  renderPlayers();
+  renderPopular();
+  renderValuable();
+  renderTransfers();
+  renderTransferExtremes();
+  renderCaptains();
+  renderDifferentials();
+  renderTotw();
 }
 
 function card(label, value, sub = '') {
@@ -338,21 +379,147 @@ function teamDetail(r) {
   </div>`;
 }
 
-function renderPlayers() {
-  const top = state.result.players.slice(0, 25);
-  $('#players tbody').innerHTML = top
+function price(tenths) {
+  return `£${(tenths / 10).toFixed(1)}m`;
+}
+
+function posGrid(byPosition, renderCard) {
+  return [1, 2, 3, 4]
+    .map((type) => {
+      const list = byPosition[type] || [];
+      return `<div class="pos-col">
+        <h3>${POSITIONS[type]}</h3>
+        ${list.length ? list.map(renderCard).join('') : '<p class="muted small">—</p>'}
+      </div>`;
+    })
+    .join('');
+}
+
+function renderPopular() {
+  const { popular } = state.extras;
+  const total = state.result.managers || 1;
+  $('#popular').innerHTML = posGrid(
+    popular,
+    (p) => `<div class="mini-card">
+      <div class="mini-name">${esc(p.name)} <small>${esc(teamShort(p.team))}</small></div>
+      <div class="mini-sub">${p.owned}/${total} managers · ${((p.owned / total) * 100).toFixed(0)}%</div>
+    </div>`,
+  );
+}
+
+function renderValuable() {
+  const { valuable } = state.extras;
+  $('#valuable').innerHTML = posGrid(
+    valuable,
+    (p) => `<div class="mini-card">
+      <div class="mini-name">${esc(p.name)} <small>${esc(teamShort(p.team))}</small></div>
+      <div class="mini-sub">${price(p.price)} · ${p.owned} owner${p.owned === 1 ? '' : 's'} · <strong>${p.points} pts</strong></div>
+    </div>`,
+  );
+}
+
+function transferList(list) {
+  if (!list.length) return '<p class="muted small">No transfers yet this gameweek.</p>';
+  return `<ul class="picks">${list
     .map(
-      (p) => `<tr class="state-${p.state}">
-      <td>${esc(p.name)}</td>
-      <td class="hide-sm">${POSITIONS[p.type] || ''}</td>
-      <td>${esc(teamShort(p.team))}</td>
-      <td class="num strong">${p.points}</td>
-      <td class="num">${p.ownedPct.toFixed(0)}%</td>
-      <td class="num">${p.captainedPct.toFixed(0)}%</td>
-      <td class="num strong">${p.eoPct.toFixed(0)}%</td>
-    </tr>`,
+      (t) => `<li class="pick transfer-line">
+        <span class="pname">${esc(playerName(t.element))} <small>${esc(playerTeamShort(t.element))}</small></span>
+        <span class="ppts">${t.count}×</span>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+function renderTransfers() {
+  const { mostBought, mostSold, count } = state.extras.transfers;
+  if (!count) {
+    $('#transfers').innerHTML = '<p class="muted small">No transfers made in the league this gameweek.</p>';
+    return;
+  }
+  $('#transfers').innerHTML = `
+    <div><h3>📥 Most bought</h3>${transferList(mostBought)}</div>
+    <div><h3>📤 Most sold</h3>${transferList(mostSold)}</div>
+  `;
+}
+
+function transferCard(t, label) {
+  if (!t) return `<div><h3>${label}</h3><p class="muted small">No transfers yet this gameweek.</p></div>`;
+  const sign = t.delta > 0 ? '+' : '';
+  return `<div><h3>${label}</h3>
+    <div class="mini-card">
+      <div class="mini-name">${esc(playerName(t.elementOut))} → ${esc(playerName(t.elementIn))}</div>
+      <div class="mini-sub">${esc(playerName(t.elementOut))}: ${t.pointsOut} pts · ${esc(playerName(t.elementIn))}: ${t.pointsIn} pts</div>
+      <div class="mini-sub strong">${sign}${t.delta} pts swing</div>
+    </div>
+  </div>`;
+}
+
+function renderTransferExtremes() {
+  const { best, worst } = state.extras.transfers;
+  $('#transfer-extremes').innerHTML = `${transferCard(best, '📈 Best transfer')}${transferCard(worst, '📉 Worst transfer')}`;
+}
+
+function renderCaptains() {
+  const { captains } = state.extras;
+  if (!captains.length) {
+    $('#captains').innerHTML = '<p class="muted small">No captains recorded.</p>';
+    return;
+  }
+  const max = captains[0].count;
+  $('#captains').innerHTML = `<ul class="cap-bars">${captains
+    .map(
+      (c) => `<li class="cap-bar">
+        <span class="cap-name">${esc(playerName(c.element))}</span>
+        <span class="cap-track"><span class="cap-fill" style="width:${(c.count / max) * 100}%"></span></span>
+        <span class="cap-count">${c.count} (${c.pct.toFixed(0)}%)</span>
+      </li>`,
+    )
+    .join('')}</ul>`;
+}
+
+function renderDifferentials() {
+  const { diffs } = state.extras;
+  if (!diffs.length) {
+    $('#differentials').innerHTML = '<p class="muted small">No differentials this gameweek.</p>';
+    return;
+  }
+  $('#differentials').innerHTML = `<div class="pos-col diff-row">${diffs
+    .map(
+      (p) => `<div class="mini-card">
+        <div class="mini-name">${esc(p.name)} <small>${esc(teamShort(p.team))}</small></div>
+        <div class="mini-sub">${POSITIONS[p.type]} · ${p.started} manager${p.started === 1 ? '' : 's'} · <strong>${p.points} pts</strong></div>
+      </div>`,
+    )
+    .join('')}</div>`;
+}
+
+function pitchCard(p, isCaptain) {
+  return `<div class="pitch-card">
+    <div class="pitch-name">${esc(p.name)}${isCaptain ? ' <span class="tag cap">C</span>' : ''}</div>
+    <div class="pitch-sub">${esc(teamShort(p.team))} · ${p.points} pts</div>
+  </div>`;
+}
+
+function renderTotw() {
+  const totw = state.extras.totw;
+  if (!totw) {
+    $('#totw').innerHTML = '<p class="muted small">Not enough data yet to build a team of the week.</p>';
+    return;
+  }
+  const rowsHtml = [totw.gk, totw.def, totw.mid, totw.fwd]
+    .map(
+      (row) =>
+        `<div class="pitch-row">${row.map((p) => pitchCard(p, p.element === totw.captain)).join('')}</div>`,
     )
     .join('');
+  $('#totw').innerHTML = `
+    <div class="pitch">${rowsHtml}</div>
+    <div class="detail-foot">
+      <span>Formation: ${totw.formation}</span>
+      <span>Squad cost: ${price(totw.cost)} / £100.0m</span>
+      <span>Total points: <strong>${totw.totalPoints}</strong></span>
+    </div>
+  `;
 }
 
 init();

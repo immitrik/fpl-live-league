@@ -27,6 +27,7 @@ export const api = {
   standings: (league, page = 1) =>
     get(`/api/leagues-classic/${league}/standings/?page_standings=${page}`),
   picks: (entry, gw) => get(`/api/entry/${entry}/event/${gw}/picks/`),
+  transfers: (entry) => get(`/api/entry/${entry}/transfers/`),
 };
 
 /** Load league standings, following pagination up to `max` managers. */

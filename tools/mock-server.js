@@ -27,7 +27,9 @@ const elements = [];
 for (const t of teams) {
   for (const [type, n] of [[1, 2], [2, 5], [3, 5], [4, 3]]) {
     for (let k = 0; k < n; k++) {
-      elements.push({ id: elements.length + 1, web_name: makeName(), team: t.id, element_type: type });
+      const base = { 1: 45, 2: 40, 3: 50, 4: 55 }[type];
+      const now_cost = base + Math.floor(rnd() * 100);
+      elements.push({ id: elements.length + 1, web_name: makeName(), team: t.id, element_type: type, now_cost });
     }
   }
 }
@@ -125,6 +127,23 @@ const entries = MANAGERS.map((m, i) => {
   };
 });
 
+// A handful of managers made transfers this gameweek.
+const transfersByEntry = new Map();
+entries.forEach((e, i) => {
+  if (i % 3 !== 0) return;
+  const picksIn = e.picks.picks.map((p) => p.element);
+  const candidatesOut = picksIn.slice(0, 3);
+  const candidatesIn = elements.filter((el) => !picksIn.includes(el.id)).sort(() => rnd() - 0.5).slice(0, 3);
+  const list = candidatesOut.map((out, idx) => ({
+    element_in: candidatesIn[idx]?.id,
+    element_out: out,
+    event: GW,
+    entry: e.entry,
+    time: new Date().toISOString(),
+  })).filter((t) => t.element_in);
+  transfersByEntry.set(e.entry, list);
+});
+
 const routes = [
   [/^\/api\/bootstrap-static\/$/, () => ({ events, teams, elements })],
   [/^\/api\/fixtures\/$/, () => fixtures],
@@ -140,6 +159,7 @@ const routes = [
     },
   })],
   [/^\/api\/entry\/(\d+)\/event\/\d+\/picks\/$/, (m) => entries.find((e) => e.entry === Number(m[1]))?.picks],
+  [/^\/api\/entry\/(\d+)\/transfers\/$/, (m) => transfersByEntry.get(Number(m[1])) || []],
 ];
 
 http

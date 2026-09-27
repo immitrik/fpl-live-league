@@ -13,6 +13,7 @@ const ROUTES = [
   [/^\/api\/entry\/\d+\/event\/\d+\/picks\/$/, 300],
   [/^\/api\/entry\/\d+\/history\/$/, 600],
   [/^\/api\/entry\/\d+\/$/, 600],
+  [/^\/api\/entry\/\d+\/transfers\/$/, 300],
 ];
 
 const ALLOWED_QUERY = new Set(['event', 'page_standings', 'page_new_entries', 'phase']);
