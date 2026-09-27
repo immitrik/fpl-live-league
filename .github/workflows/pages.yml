@@ -1,0 +1,46 @@
+name: Deploy web app to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject Worker URL
+        env:
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          DEFAULT_LEAGUE_ID: ${{ vars.DEFAULT_LEAGUE_ID }}
+        run: |
+          if [ -z "$WORKER_URL" ]; then
+            echo "::warning::Repository variable WORKER_URL is not set; the site will show a configuration error."
+          else
+            sed -i "s#__WORKER_URL__#${WORKER_URL%/}#" web/js/config.js
+          fi
+          if [ -n "$DEFAULT_LEAGUE_ID" ]; then
+            sed -i "s#DEFAULT_LEAGUE_ID: null#DEFAULT_LEAGUE_ID: ${DEFAULT_LEAGUE_ID}#" web/js/config.js
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

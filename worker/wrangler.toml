@@ -1,0 +1,9 @@
+name = "fpl-live-proxy"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+# Comma-separated list of origins allowed to call the proxy, or "*" for any.
+# Example: "https://your-username.github.io,http://localhost:5173"
+ALLOWED_ORIGIN = "*"

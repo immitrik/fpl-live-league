@@ -1,0 +1,17 @@
+{
+  "name": "fpl-live-league",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live Fantasy Premier League mini-league tracker (static web app + Cloudflare Worker proxy)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "dev:web": "npx --yes serve web -l 5173",
+    "dev:worker": "cd worker && npx --yes wrangler dev --port 8787",
+    "dev:mock": "node tools/mock-server.js"
+  }
+}

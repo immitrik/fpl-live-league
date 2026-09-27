@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FPL Live League</title>
+    <meta name="description" content="Live Fantasy Premier League mini-league standings with projected bonus and auto-subs." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>" />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap topbar-inner">
+        <div class="brand">⚽ FPL Live League</div>
+        <div id="status" class="status" hidden></div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section id="league-form-section" class="panel form-panel" hidden>
+        <h1>Track a mini-league live</h1>
+        <p class="muted">
+          Enter a classic league ID, or paste the league URL from the FPL website
+          (e.g. <code>https://fantasy.premierleague.com/leagues/123456/standings/c</code>).
+        </p>
+        <form id="league-form">
+          <input id="league-input" type="text" inputmode="numeric" placeholder="League ID or URL" autocomplete="off" required />
+          <button type="submit">Show league</button>
+        </form>
+      </section>
+
+      <section id="league-view" hidden>
+        <div class="league-head">
+          <div>
+            <h1 id="league-name">League</h1>
+            <div class="meta">
+              <span id="gw-badge" class="badge">GW</span>
+              <span id="live-badge" class="badge live" hidden>● LIVE</span>
+              <span id="updated" class="muted"></span>
+            </div>
+          </div>
+          <div class="controls">
+            <select id="gw-select" aria-label="Gameweek"></select>
+            <label id="auto-wrap" class="toggle"><input id="auto-toggle" type="checkbox" checked /> Auto-refresh</label>
+            <button id="refresh-btn" type="button">Refresh</button>
+            <button id="change-league" type="button" class="ghost">Change league</button>
+          </div>
+        </div>
+
+        <div id="summary" class="summary"></div>
+
+        <div id="fixtures" class="fixtures"></div>
+
+        <section class="panel">
+          <h2>Live standings</h2>
+          <p class="muted small">Includes provisional bonus and projected auto-subs. Tap a row to see the team.</p>
+          <div class="table-wrap">
+            <table id="standings">
+              <thead>
+                <tr>
+                  <th class="num">#</th>
+                  <th class="num"></th>
+                  <th>Team</th>
+                  <th class="num">GW</th>
+                  <th class="hide-sm">Captain</th>
+                  <th class="num">Total</th>
+                  <th>Chip</th>
+                  <th class="hide-sm">Players</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>League ownership</h2>
+          <p class="muted small">
+            EO (effective ownership) = share of managers starting the player, counting captains twice (triple captain three times).
+          </p>
+          <div class="table-wrap">
+            <table id="players">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th class="hide-sm">Pos</th>
+                  <th>Team</th>
+                  <th class="num">Pts</th>
+                  <th class="num">Owned</th>
+                  <th class="num">Capt</th>
+                  <th class="num">EO</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="wrap footer muted small">
+      Data from the public Fantasy Premier League API. Not affiliated with the Premier League.
+    </footer>
+
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
