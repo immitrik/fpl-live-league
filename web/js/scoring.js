@@ -507,42 +507,61 @@ function convolveMax(a, b) {
   return out;
 }
 
-/** Reconstructs the exact item set achieving dp[k][maxBudget] for a single position pool. */
+/**
+ * Reconstructs the exact item set achieving dp[k][maxBudget] for a single position pool.
+ * Keeps a full before/after snapshot per item (rather than a single rolling table with
+ * "last item that touched this cell" pointers) so backtracking can't double-pick an item:
+ * a rolling table can't tell whether a later item's update to a *different* cell also
+ * happens to reuse the same item this cell's chain already used.
+ */
 function knapsackReconstruct(items, k, maxBudget) {
   if (k === 0) return { value: 0, items: [] };
   const NEG = -Infinity;
-  const dp = Array.from({ length: k + 1 }, () => new Float64Array(maxBudget + 1).fill(NEG));
-  const choice = Array.from({ length: k + 1 }, () => new Int32Array(maxBudget + 1).fill(-1));
-  dp[0].fill(0);
-  items.forEach((it, i) => {
+  const makeLayer = () => Array.from({ length: k + 1 }, () => new Float64Array(maxBudget + 1).fill(NEG));
+
+  let before = makeLayer();
+  before[0].fill(0);
+  const history = [before];
+
+  for (const it of items) {
+    const after = before.map((row) => row.slice());
     for (let c = k; c >= 1; c--) {
-      const prev = dp[c - 1];
-      const cur = dp[c];
+      const prevRow = before[c - 1];
+      const curRow = after[c];
       for (let b = maxBudget; b >= it.cost; b--) {
-        const v = prev[b - it.cost];
-        if (v !== NEG && v + it.points > cur[b]) {
-          cur[b] = v + it.points;
-          choice[c][b] = i;
-        }
+        const v = prevRow[b - it.cost];
+        if (v !== NEG && v + it.points > curRow[b]) curRow[b] = v + it.points;
       }
     }
-  });
+    history.push(after);
+    before = after;
+  }
+
+  const finalValue = history[items.length][k][maxBudget];
   const picked = [];
   let c = k;
   let b = maxBudget;
-  while (c > 0 && b >= 0) {
-    const i = choice[c][b];
-    if (i === -1) break;
-    picked.push(items[i]);
-    b -= items[i].cost;
-    c--;
+  for (let t = items.length; t >= 1 && c > 0; t--) {
+    if (history[t][c][b] !== history[t - 1][c][b]) {
+      const it = items[t - 1];
+      picked.push(it);
+      b -= it.cost;
+      c--;
+    }
   }
-  return { value: dp[k][maxBudget] === NEG ? 0 : dp[k][maxBudget], items: picked };
+  return { value: finalValue === NEG ? 0 : finalValue, items: picked };
 }
 
-/** Best single replacement for `type`, excluding `exclude` elements and clubs already at the cap. */
-function bestReplacement(pool, type, exclude, budget, forbiddenClubs) {
-  const candidates = pool[type].filter((p) => !exclude.has(p.element) && !forbiddenClubs.has(p.team) && p.cost <= budget);
+/**
+ * Best single replacement for `type`, excluding `exclude` elements and any club that would
+ * hit (or stay over) the 3-per-club cap once this player joins -- not just clubs already
+ * *over* the cap, otherwise swapping one violation away just recreates it at a club that was
+ * sitting exactly at 3, and the repair loop oscillates forever between the two clubs.
+ */
+function bestReplacement(pool, type, exclude, budget, byClub) {
+  const candidates = pool[type].filter(
+    (p) => !exclude.has(p.element) && (byClub.get(p.team) || 0) < TOTW_MAX_PER_CLUB && p.cost <= budget,
+  );
   if (!candidates.length) return null;
   return candidates.reduce((a, p) => (p.points > a.points ? p : a));
 }
@@ -550,22 +569,31 @@ function bestReplacement(pool, type, exclude, budget, forbiddenClubs) {
 /** Swap out over-the-cap club players for the best legal alternative until the 3-per-club rule holds. */
 function repairClubLimits(team, pool) {
   let guard = 0;
-  while (guard++ < 30) {
+  while (guard++ < 40) {
     const byClub = new Map();
     for (const p of team) byClub.set(p.team, (byClub.get(p.team) || 0) + 1);
-    const offendingClub = [...byClub.entries()].find(([, n]) => n > TOTW_MAX_PER_CLUB)?.[0];
-    if (offendingClub === undefined) break;
+    const offendingEntries = [...byClub.entries()].filter(([, n]) => n > TOTW_MAX_PER_CLUB);
+    if (!offendingEntries.length) break;
 
-    const offenders = team.filter((p) => p.team === offendingClub).sort((a, b) => a.points - b.points);
-    const victim = offenders[0];
-    const usedCost = team.reduce((s, p) => s + p.cost, 0);
-    const budget = TOTW_BUDGET - usedCost + victim.cost;
-    const exclude = new Set(team.map((p) => p.element));
-    const forbiddenClubs = new Set([...byClub.entries()].filter(([, n]) => n > TOTW_MAX_PER_CLUB).map(([c]) => c));
-    const replacement = bestReplacement(pool, victim.type, exclude, budget, forbiddenClubs);
-    if (!replacement) break; // no legal swap found; leave the (rare) violation in place
-    const idx = team.indexOf(victim);
-    team[idx] = replacement;
+    // Try every offender (lowest points first, within each offending club) until one has a
+    // legal replacement -- the single lowest scorer overall may have no swap available (wrong
+    // type / no budget) while a different offender does.
+    let swapped = false;
+    for (const [club] of offendingEntries) {
+      const offenders = team.filter((p) => p.team === club).sort((a, b) => a.points - b.points);
+      for (const victim of offenders) {
+        const usedCost = team.reduce((s, p) => s + p.cost, 0);
+        const budget = TOTW_BUDGET - usedCost + victim.cost;
+        const exclude = new Set(team.map((p) => p.element));
+        const replacement = bestReplacement(pool, victim.type, exclude, budget, byClub);
+        if (!replacement) continue;
+        team[team.indexOf(victim)] = replacement;
+        swapped = true;
+        break;
+      }
+      if (swapped) break;
+    }
+    if (!swapped) break; // no legal swap found anywhere; leave the (rare) violation in place
   }
   return team;
 }

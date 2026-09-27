@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeBonus, buildContext, scoreEntry, aggregateLeague } from '../web/js/scoring.js';
+import { computeBonus, buildContext, scoreEntry, aggregateLeague, buildTeamOfTheWeek } from '../web/js/scoring.js';
 
 // ---------- helpers ----------
 // Squad: GK 1, DEF 2-5, MID 6-9, FWD 10-11 as starters; bench GK 12, DEF 13, MID 14, FWD 15.
@@ -214,4 +214,79 @@ test('league aggregation: totals, hits, ranks and effective ownership', () => {
   assert.equal(p10.ownedPct, 100);
   assert.equal(p10.captainedPct, 50);
   assert.equal(p10.eoPct, 150);
+});
+
+// ---------- team of the week ----------
+function totwPlayer(element, type, team, cost, points, captained = 0, captainMultiplier = 0) {
+  return { element, name: `P${element}`, team, type, price: cost, points, started: 1, owned: 1, captained, captainMultiplier };
+}
+
+test('team of the week: never picks the same player twice', () => {
+  // Deliberately give club 6 four strong DEF/FWD candidates -> forces the club-limit repair,
+  // which used to reconstruct duplicate picks (regression for a real production bug).
+  const players = [
+    totwPlayer(1, 1, 1, 45, 6),
+    totwPlayer(2, 1, 2, 50, 5),
+    totwPlayer(10, 2, 6, 65, 16),
+    totwPlayer(11, 2, 6, 55, 16),
+    totwPlayer(12, 2, 1, 97, 2),
+    totwPlayer(13, 2, 4, 88, 9),
+    totwPlayer(14, 2, 8, 113, 4),
+    totwPlayer(15, 2, 1, 76, 0),
+    totwPlayer(16, 2, 3, 60, 7),
+    totwPlayer(20, 3, 2, 90, 10),
+    totwPlayer(21, 3, 3, 80, 9),
+    totwPlayer(22, 3, 5, 70, 8),
+    totwPlayer(23, 3, 6, 100, 12),
+    totwPlayer(24, 3, 7, 85, 11),
+    totwPlayer(30, 4, 6, 174, 21),
+    totwPlayer(31, 4, 6, 165, 21),
+    totwPlayer(32, 4, 1, 173, 11),
+    totwPlayer(33, 4, 2, 137, 8),
+    totwPlayer(34, 4, 3, 76, 5),
+  ];
+  const totw = buildTeamOfTheWeek(players);
+  assert.ok(totw);
+  const all = [...totw.gk, ...totw.def, ...totw.mid, ...totw.fwd];
+  const ids = all.map((p) => p.element);
+  assert.equal(new Set(ids).size, ids.length, `duplicate pick in ${JSON.stringify(ids)}`);
+  assert.ok(totw.cost <= 1000, `over budget: ${totw.cost}`);
+  const byClub = new Map();
+  for (const p of all) byClub.set(p.team, (byClub.get(p.team) || 0) + 1);
+  for (const [club, n] of byClub) assert.ok(n <= 3, `club ${club} has ${n} players`);
+});
+
+test('team of the week: randomized pools never duplicate a pick or break budget/club rules', () => {
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const gen = (n, type, priceBase, priceRange, pointsRange, clubs) =>
+    Array.from({ length: n }, (_, i) =>
+      totwPlayer(
+        type * 1000 + i,
+        type,
+        (i % clubs) + 1,
+        priceBase + Math.floor(rnd() * priceRange),
+        Math.floor(rnd() * pointsRange),
+        rnd() < 0.05 ? 1 : 0,
+        rnd() < 0.5 ? 2 : 3,
+      ),
+    );
+
+  for (let trial = 0; trial < 60; trial++) {
+    const players = [
+      ...gen(5 + Math.floor(rnd() * 10), 1, 40, 80, 15, 8),
+      ...gen(15 + Math.floor(rnd() * 25), 2, 38, 90, 18, 8),
+      ...gen(15 + Math.floor(rnd() * 25), 3, 45, 110, 20, 8),
+      ...gen(8 + Math.floor(rnd() * 15), 4, 45, 130, 22, 8),
+    ];
+    const totw = buildTeamOfTheWeek(players);
+    if (!totw) continue;
+    const all = [...totw.gk, ...totw.def, ...totw.mid, ...totw.fwd];
+    const ids = all.map((p) => p.element);
+    assert.equal(new Set(ids).size, ids.length, `trial ${trial}: duplicate pick`);
+    assert.ok(totw.cost <= 1000, `trial ${trial}: over budget (${totw.cost})`);
+    const byClub = new Map();
+    for (const p of all) byClub.set(p.team, (byClub.get(p.team) || 0) + 1);
+    for (const [club, n] of byClub) assert.ok(n <= 3, `trial ${trial}: club ${club} has ${n} players`);
+  }
 });
