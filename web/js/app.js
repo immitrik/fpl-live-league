@@ -416,7 +416,7 @@ function posGrid(byPosition, renderCard) {
   return [1, 2, 3, 4]
     .map((type) => {
       const list = byPosition[type] || [];
-      return `<div class="pos-col">
+      return `<div class="pos-col" data-pos="${type}">
         <h3>${POSITIONS[type]}</h3>
         ${list.length ? list.map(renderCard).join('') : '<p class="muted small">—</p>'}
       </div>`;
@@ -558,7 +558,7 @@ function renderDifferentials() {
 
 function pitchCard(p, isCaptain, multiplier) {
   const pts = isCaptain ? p.points * multiplier : p.points;
-  return `<div class="pitch-card">
+  return `<div class="pitch-card pos-${p.type}">
     <div class="pitch-name">${esc(p.name)}${isCaptain ? ` <span class="tag cap">C×${multiplier}</span>` : ''}</div>
     <div class="pitch-sub">${esc(teamShort(p.team))} · ${pts} pts</div>
   </div>`;
