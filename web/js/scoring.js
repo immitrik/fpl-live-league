@@ -10,6 +10,13 @@ export const CHIP_LABELS = {
   manager: 'AM',
 };
 
+const BREAKDOWN_STATS = {
+  goals_scored: 'goals',
+  assists: 'assists',
+  bonus: 'bonus',
+  defensive_contribution: 'defensive',
+};
+
 /**
  * Official FPL bonus allocation from a list of { element, value } BPS entries.
  * Ties share the higher reward and consume the following places:
@@ -79,11 +86,20 @@ export function buildContext(bootstrap, live, fixtures, gw) {
       const confirmed = explain?.stats?.some((s) => s.identifier === 'bonus' && s.value > 0);
       if (!confirmed) provisionalBonus += table.get(el.id);
     }
+    // Points earned per stat (summed over all of the player's fixtures this gameweek).
+    const breakdown = { goals: 0, assists: 0, bonus: provisionalBonus, defensive: 0 };
+    for (const ex of el.explain || []) {
+      for (const st of ex.stats || []) {
+        const key = BREAKDOWN_STATS[st.identifier];
+        if (key) breakdown[key] += st.points || 0;
+      }
+    }
     liveById.set(el.id, {
       minutes: el.stats?.minutes || 0,
       basePoints: el.stats?.total_points || 0,
       provisionalBonus,
       points: (el.stats?.total_points || 0) + provisionalBonus,
+      breakdown,
     });
   }
 
@@ -111,7 +127,13 @@ export function buildContext(bootstrap, live, fixtures, gw) {
   };
 }
 
-const EMPTY_LIVE = { minutes: 0, basePoints: 0, provisionalBonus: 0, points: 0 };
+const EMPTY_LIVE = {
+  minutes: 0,
+  basePoints: 0,
+  provisionalBonus: 0,
+  points: 0,
+  breakdown: { goals: 0, assists: 0, bonus: 0, defensive: 0 },
+};
 
 function validFormation(xi) {
   const count = { 1: 0, 2: 0, 3: 0, 4: 0 };

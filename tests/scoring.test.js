@@ -290,3 +290,22 @@ test('team of the week: randomized pools never duplicate a pick or break budget/
     for (const [club, n] of byClub) assert.ok(n <= 3, `trial ${trial}: club ${club} has ${n} players`);
   }
 });
+
+// ---------- points breakdown ----------
+test('breakdown: goals, assists, bonus and defensive contribution come from explain', () => {
+  const lv = live({});
+  lv.elements[5].explain = [
+    {
+      fixture: 6,
+      stats: [
+        { identifier: 'goals_scored', points: 5, value: 1 },
+        { identifier: 'assists', points: 3, value: 1 },
+        { identifier: 'bonus', points: 2, value: 2 },
+        { identifier: 'defensive_contribution', points: 2, value: 12 },
+        { identifier: 'minutes', points: 2, value: 90 },
+      ],
+    },
+  ];
+  const ctx = buildContext(bootstrap(), lv, fixtures({}), 1);
+  assert.deepEqual(ctx.liveById.get(6).breakdown, { goals: 5, assists: 3, bonus: 2, defensive: 2 });
+});

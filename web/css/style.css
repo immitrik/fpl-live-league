@@ -131,6 +131,10 @@ button.ghost:hover { box-shadow: none; filter: none; background: var(--row-hover
   margin-top: 16px;
 }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { border-color: var(--accent); }
+.chips-list { margin-top: 10px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+.chip-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .card-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .card-value { font-size: 22px; font-weight: 700; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -220,6 +224,8 @@ tr.detail > td { background: var(--row-hover); padding: 8px 8px 14px; }
 .state-live .pstate { color: var(--live); }
 .pmin { text-align: right; color: var(--muted); font-size: 12px; }
 .ppts { text-align: right; font-weight: 700; }
+.pbreak { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.pbreak strong { color: var(--text); }
 .bonus { font-size: 10px; color: var(--accent-2); margin-left: 3px; }
 .bench-title { margin-top: 10px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; }
 .detail-foot { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }

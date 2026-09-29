@@ -31,6 +31,7 @@ const state = {
   extras: null,
   ctx: null,
   expanded: new Set(),
+  showChips: false,
   sortKey: 'rank',
   auto: true,
   timer: null,
@@ -102,6 +103,11 @@ async function init() {
   $('#standings-sort').addEventListener('change', (e) => {
     state.sortKey = e.target.value;
     renderStandings();
+  });
+  $('#summary').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-toggle="chips"]')) return;
+    state.showChips = !state.showChips;
+    renderSummary();
   });
   $('#standings').addEventListener('click', (e) => {
     const row = e.target.closest('tr[data-entry]');
@@ -255,22 +261,7 @@ function render() {
     : '';
   $('#auto-wrap').hidden = !live;
 
-  const scored = rows.filter((r) => !r.missing);
-  const avg = scored.length ? scored.reduce((a, r) => a + r.net, 0) / scored.length : 0;
-  const best = scored.reduce((a, r) => (!a || r.net > a.net ? r : a), null);
-  const capCount = new Map();
-  for (const r of scored) if (r.captain) capCount.set(r.captain, (capCount.get(r.captain) || 0) + 1);
-  const topCap = [...capCount.entries()].sort((a, b) => b[1] - a[1])[0];
-  const chips = scored.filter((r) => r.chip).length;
-
-  $('#summary').innerHTML = [
-    card('👥 Managers', scored.length),
-    card('📊 Average GW', avg.toFixed(1)),
-    card('🏆 Top GW score', best ? `${best.net}` : '—', best ? esc(best.teamName) : ''),
-    card('👑 Most captained', topCap ? esc(playerName(topCap[0])) : '—', topCap ? `${topCap[1]} of ${scored.length}` : ''),
-    card('🃏 Chips played', chips),
-  ].join('');
-
+  renderSummary();
   renderFixtures();
   renderStandings();
   renderPopular();
@@ -284,8 +275,36 @@ function render() {
   renderTotw();
 }
 
-function card(label, value, sub = '') {
-  return `<div class="card"><div class="card-label">${label}</div><div class="card-value">${value}</div>${
+function renderSummary() {
+  const { rows } = state.result;
+  const scored = rows.filter((r) => !r.missing);
+  const avg = scored.length ? scored.reduce((a, r) => a + r.net, 0) / scored.length : 0;
+  const best = scored.reduce((a, r) => (!a || r.net > a.net ? r : a), null);
+  const capCount = new Map();
+  for (const r of scored) if (r.captain) capCount.set(r.captain, (capCount.get(r.captain) || 0) + 1);
+  const topCap = [...capCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  const chipRows = scored.filter((r) => r.chip);
+  const chips = chipRows.length;
+
+  $('#summary').innerHTML = [
+    card('👥 Managers', scored.length),
+    card('📊 Average GW', avg.toFixed(1)),
+    card('🏆 Top GW score', best ? `${best.net}` : '—', best ? esc(best.teamName) : ''),
+    card('👑 Most captained', topCap ? esc(playerName(topCap[0])) : '—', topCap ? `${topCap[1]} of ${scored.length}` : ''),
+    card('🃏 Chips played', chips, chips ? (state.showChips ? 'tap to hide' : 'tap to show teams') : '', 'chips'),
+  ].join('');
+  $('#chips-list').hidden = !(state.showChips && chips);
+  $('#chips-list').innerHTML = chipRows
+    .map(
+      (r) => `<div class="chip-row"><span class="chip chip-${esc(r.chip)}">${esc(CHIP_LABELS[r.chip] || r.chip)}</span>
+        <span class="team-name">${esc(r.teamName)}</span> <span class="muted small">${esc(r.manager)}</span></div>`,
+    )
+    .join('');
+}
+
+function card(label, value, sub = '', toggle = '') {
+  const attrs = toggle && value ? ` data-toggle="${toggle}" role="button" tabindex="0"` : '';
+  return `<div class="card${attrs ? ' clickable' : ''}"${attrs}><div class="card-label">${label}</div><div class="card-value">${value}</div>${
     sub ? `<div class="card-sub">${sub}</div>` : ''
   }</div>`;
 }
@@ -384,12 +403,23 @@ function pickLine(p) {
   if (p.subOut) badges.push('<span class="tag out">OUT</span>');
   const bonus = p.live.provisionalBonus ? `<span class="bonus" title="Provisional bonus">+${p.live.provisionalBonus}b</span>` : '';
   const stateIcon = { live: '●', pending: '⏳', done: '', blank: '—' }[p.state] || '';
+  const b = p.live.breakdown;
+  const parts = [
+    ['⚽ Goals', b.goals],
+    ['🅰️ Assists', b.assists],
+    ['⭐ Bonus', b.bonus],
+    ['🛡️ Def. contrib.', b.defensive],
+  ]
+    .filter(([, v]) => v)
+    .map(([label, v]) => `<span>${label} <strong>${v > 0 ? '+' : ''}${v}</strong></span>`);
+  const breakdown = parts.length ? `<span class="pbreak">${parts.join('')}</span>` : '';
   return `<li class="pick state-${p.state} ${p.inXI ? '' : 'benched'}">
     <span class="pos">${POSITIONS[p.type] || ''}</span>
     <span class="pname">${esc(p.name)} <small>${esc(teamShort(p.team))}</small> ${badges.join('')}</span>
     <span class="pstate">${stateIcon}</span>
     <span class="pmin">${p.live.minutes}'</span>
     <span class="ppts">${p.inXI ? p.total : `(${p.live.points})`}${bonus}</span>
+    ${breakdown}
   </li>`;
 }
 
