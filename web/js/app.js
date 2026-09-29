@@ -355,7 +355,7 @@ function renderStandings() {
       if (r.missing) {
         return `<tr class="missing"><td class="num">${r.liveTotalRank}</td><td></td>
           <td>${teamCell(r)}</td><td class="num" colspan="2">no team this GW</td>
-          <td class="num strong">${r.liveTotal}</td><td colspan="3"></td></tr>`;
+          <td class="num strong">${r.liveTotal}</td><td colspan="4"></td></tr>`;
       }
       const open = state.expanded.has(r.entry);
       const cap = r.effectiveCaptain ?? r.captain;
@@ -371,10 +371,13 @@ function renderStandings() {
         </td>
         <td class="num strong">${r.liveTotal}</td>
         <td class="num hide-sm">${r.benchPoints}</td>
+        <td class="num hide-sm" title="Best possible: ${r.maxPoints} pts">${r.maxPoints}${
+          r.maxPoints > r.gwPoints ? `<span class="muted small"> (−${r.maxPoints - r.gwPoints})</span>` : ''
+        }</td>
         <td>${r.chip ? `<span class="chip chip-${esc(r.chip)}">${esc(CHIP_LABELS[r.chip] || r.chip)}</span>` : ''}</td>
         <td class="hide-sm progress">${progress(r.counts)}</td>
       </tr>`;
-      return open ? main + `<tr class="detail"><td colspan="9">${teamDetail(r)}</td></tr>` : main;
+      return open ? main + `<tr class="detail"><td colspan="10">${teamDetail(r)}</td></tr>` : main;
     })
     .join('');
   $('#standings tbody').innerHTML = body;
@@ -432,6 +435,7 @@ function teamDetail(r) {
     ${bench.length ? `<div class="bench-title">Bench</div><ul class="picks">${bench.map(pickLine).join('')}</ul>` : ''}
     <div class="detail-foot">
       <span>Transfers: ${r.transfers}${r.hits ? ` (−${r.hits})` : ''}</span>
+      <span>Max possible: ${r.maxPoints}${r.maxPoints > r.gwPoints ? ` (missed ${r.maxPoints - r.gwPoints})` : ''}</span>
       <span>Before GW: ${r.prevTotal}</span>
       <a href="${link}" target="_blank" rel="noopener">Open on FPL ↗</a>
     </div>

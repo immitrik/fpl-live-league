@@ -142,6 +142,35 @@ function validFormation(xi) {
 }
 
 /**
+ * Best score the 15-man squad could have produced with perfect hindsight: optimal XI (valid
+ * formation) and the armband on the top scorer. Bench Boost counts all 15 players.
+ * @param {Array<{type:number, live:{points:number}}>} picks all 15 squad players
+ * @param {string|null} chip
+ */
+export function maxPossiblePoints(picks, chip) {
+  const captainMultiplier = chip === '3xc' ? 3 : 2;
+  const byType = { 1: [], 2: [], 3: [], 4: [] };
+  for (const p of picks) byType[p.type]?.push(p.live.points);
+  for (const t of [1, 2, 3, 4]) byType[t].sort((a, b) => b - a);
+
+  const best = (xi) => (xi.length ? xi.reduce((s, v) => s + v, 0) + Math.max(...xi) * (captainMultiplier - 1) : 0);
+  if (chip === 'bboost') return best(picks.map((p) => p.live.points));
+  if (!byType[1].length) return 0;
+
+  let max = -Infinity;
+  for (let d = 3; d <= 5; d++) {
+    for (let m = 2; m <= 5; m++) {
+      const f = 10 - d - m;
+      if (f < 1 || f > 3) continue;
+      if (byType[2].length < d || byType[3].length < m || byType[4].length < f) continue;
+      const xi = [byType[1][0], ...byType[2].slice(0, d), ...byType[3].slice(0, m), ...byType[4].slice(0, f)];
+      max = Math.max(max, best(xi));
+    }
+  }
+  return max === -Infinity ? 0 : max;
+}
+
+/**
  * Score one manager's gameweek with projected auto-subs and provisional bonus.
  * @param {object} picksData /api/entry/{id}/event/{gw}/picks/
  * @param {object} ctx       from buildContext
@@ -230,9 +259,12 @@ export function scoreEntry(picksData, ctx) {
     gwPoints = history.points; // official, fully processed score
   }
 
+  const maxPoints = Math.max(maxPossiblePoints(picks, chip), gwPoints);
+
   return {
     chip,
     gwPoints,
+    maxPoints,
     benchPoints,
     hits: history.event_transfers_cost || 0,
     transfers: history.event_transfers || 0,

@@ -63,6 +63,11 @@ Captain scores ×2 (×3 with Triple Captain). If the captain did not play (0 min
 the vice-captain gets the multiplier, provided he is in the final XI and hasn't also failed to play.
 A vice whose match is still pending is projected as captain.
 
+### Max possible points
+`maxPossiblePoints` takes the 15 squad players' final points and picks the best valid XI
+(1 GK, ≥ 3 DEF, ≥ 2 MID, ≥ 1 FWD) with the armband (×2, ×3 with Triple Captain) on its top scorer.
+With Bench Boost all 15 count. Hits are not deducted.
+
 ### Manager totals
 ```
 prevTotal = entry_history.total_points - (entry_history.points - event_transfers_cost)

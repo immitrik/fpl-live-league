@@ -309,3 +309,18 @@ test('breakdown: goals, assists, bonus and defensive contribution come from expl
   const ctx = buildContext(bootstrap(), lv, fixtures({}), 1);
   assert.deepEqual(ctx.liveById.get(6).breakdown, { goals: 5, assists: 3, bonus: 2, defensive: 2 });
 });
+
+test('max possible points: best XI and captain with hindsight', () => {
+  // Everyone 2 pts, except starting MID 6 (1 pt) and bench FWD 15 (12 pts).
+  const ctx = buildContext(bootstrap(), live({ 15: 12, 6: 1 }), fixtures({}), 1);
+  const r = scoreEntry(picks({ captain: 10 }), ctx);
+  assert.equal(r.gwPoints, 21 + 2); // captain 10 doubled
+  // GK 2 + FWD 12 + nine 2-pointers = 32, captain on the 12-pointer adds 12.
+  assert.equal(r.maxPoints, 44);
+});
+
+test('max possible points: bench boost counts all 15, triple captain triples', () => {
+  const ctx = buildContext(bootstrap(), live({ 7: 10 }), fixtures({}), 1);
+  assert.equal(scoreEntry(picks({ chip: 'bboost' }), ctx).maxPoints, 14 * 2 + 10 + 10);
+  assert.equal(scoreEntry(picks({ chip: '3xc' }), ctx).maxPoints, 2 + 10 + 9 * 2 + 10 * 2);
+});
